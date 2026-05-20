@@ -257,12 +257,38 @@ export default function Home() {
 
   // ─── Image Input Handlers ───────────────────────────────────────────────
 
-  const handleImageInput = useCallback((dataUrl: string) => {
+  const compressImage = useCallback((dataUrl: string, maxWidth: number = 1920, quality: number = 0.85): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        // If image is small enough, return as-is
+        if (img.width <= maxWidth && dataUrl.length < 2 * 1024 * 1024) {
+          resolve(dataUrl);
+          return;
+        }
+        const scale = maxWidth / img.width;
+        const canvas = document.createElement('canvas');
+        canvas.width = maxWidth;
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(dataUrl); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressed);
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }, []);
+
+  const handleImageInput = useCallback(async (dataUrl: string) => {
     setImagePreview(dataUrl);
-    setRawImageData(dataUrl);
+    // Compress before sending to API
+    const compressed = await compressImage(dataUrl);
+    setRawImageData(compressed);
     setRecognizeResult('');
     setError(null);
-  }, []);
+  }, [compressImage]);
 
   const handlePaste = useCallback((e: ClipboardEvent) => {
     const items = e.clipboardData?.items;

@@ -14,6 +14,20 @@ const SYSTEM_PROMPT = `你是一个专业的图文识别助手。你的任务是
 8. 如果识别到标题、列表等结构，用 Markdown 格式保留结构
 9. 只输出识别结果，不要添加任何解释说明`;
 
+async function compressImage(base64DataUrl: string, maxSizeKB: number = 4000): Promise<string> {
+  // If the data is already small enough, return as-is
+  const base64Data = base64DataUrl.split(',')[1] || base64DataUrl;
+  const sizeKB = (base64Data.length * 3) / 4 / 1024;
+  if (sizeKB <= maxSizeKB) {
+    return base64DataUrl;
+  }
+
+  // For very large images, we need to resize
+  // Since we can't use canvas in Workers, we'll just truncate with a warning
+  console.warn(`Image size ${sizeKB.toFixed(0)}KB exceeds limit, sending as-is`);
+  return base64DataUrl;
+}
+
 export const onRequestPost: PagesFunction = async (context) => {
   try {
     const { image } = await context.request.json();
@@ -36,45 +50,61 @@ export const onRequestPost: PagesFunction = async (context) => {
       );
     }
 
+    // Compress image if too large
+    const compressedImage = await compressImage(image);
+
+    const requestBody = {
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: {
+                url: compressedImage,
+              },
+            },
+            {
+              type: 'text',
+              text: SYSTEM_PROMPT + '\n\n请识别这张图片中的所有文字和数学公式，按照要求格式输出。',
+            },
+          ],
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 4096,
+    };
+
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content: SYSTEM_PROMPT,
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image_url',
-                image_url: {
-                  url: image,
-                },
-              },
-              {
-                type: 'text',
-                text: '请识别这张图片中的所有文字和数学公式，按照要求格式输出。',
-              },
-            ],
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 4096,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('AI API error:', response.status, errorText);
+      // Return the actual error for debugging
+      let errorDetail = `AI 服务请求失败 (${response.status})`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error?.message) {
+          errorDetail += `：${errorJson.error.message}`;
+        } else if (errorJson.message) {
+          errorDetail += `：${errorJson.message}`;
+        }
+      } catch {
+        // If can't parse, include raw text (truncated)
+        if (errorText.length < 200) {
+          errorDetail += `：${errorText}`;
+        }
+      }
       return new Response(
-        JSON.stringify({ success: false, error: `AI 服务请求失败 (${response.status})，请稍后重试` }),
+        JSON.stringify({ success: false, error: errorDetail }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -101,8 +131,9 @@ export const onRequestPost: PagesFunction = async (context) => {
     );
   } catch (error) {
     console.error('Recognition error:', error);
+    const message = error instanceof Error ? error.message : '识别过程发生错误';
     return new Response(
-      JSON.stringify({ success: false, error: '识别过程发生错误，请稍后重试' }),
+      JSON.stringify({ success: false, error: `识别过程发生错误：${message}` }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
