@@ -14,18 +14,16 @@ const SYSTEM_PROMPT = `你是一个专业的图文识别助手。你的任务是
 8. 如果识别到标题、列表等结构，用 Markdown 格式保留结构
 9. 只输出识别结果，不要添加任何解释说明`;
 
-async function compressImage(base64DataUrl: string, maxSizeKB: number = 4000): Promise<string> {
-  // If the data is already small enough, return as-is
-  const base64Data = base64DataUrl.split(',')[1] || base64DataUrl;
-  const sizeKB = (base64Data.length * 3) / 4 / 1024;
-  if (sizeKB <= maxSizeKB) {
-    return base64DataUrl;
+// Extract pure base64 from data URL, or return as-is if already pure base64
+function extractBase64(dataUrl: string): string {
+  // If it starts with "data:image/", strip the prefix
+  if (dataUrl.startsWith('data:image/')) {
+    const commaIndex = dataUrl.indexOf(',');
+    if (commaIndex !== -1) {
+      return dataUrl.substring(commaIndex + 1);
+    }
   }
-
-  // For very large images, we need to resize
-  // Since we can't use canvas in Workers, we'll just truncate with a warning
-  console.warn(`Image size ${sizeKB.toFixed(0)}KB exceeds limit, sending as-is`);
-  return base64DataUrl;
+  return dataUrl;
 }
 
 export const onRequestPost: PagesFunction = async (context) => {
@@ -41,7 +39,7 @@ export const onRequestPost: PagesFunction = async (context) => {
 
     const apiKey = context.env.AI_API_KEY;
     const baseUrl = context.env.AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
-    const model = context.env.AI_MODEL || 'glm-4v-flash';
+    const model = context.env.AI_MODEL || 'glm-4.6v-flash';
 
     if (!apiKey) {
       return new Response(
@@ -50,8 +48,9 @@ export const onRequestPost: PagesFunction = async (context) => {
       );
     }
 
-    // Compress image if too large
-    const compressedImage = await compressImage(image);
+    // ZhipuAI accepts both URL and pure base64 string
+    // For base64 data URLs, we need to extract the pure base64 part
+    const imageData = extractBase64(image);
 
     const requestBody = {
       model,
@@ -62,7 +61,7 @@ export const onRequestPost: PagesFunction = async (context) => {
             {
               type: 'image_url',
               image_url: {
-                url: compressedImage,
+                url: imageData,
               },
             },
             {
@@ -88,7 +87,6 @@ export const onRequestPost: PagesFunction = async (context) => {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('AI API error:', response.status, errorText);
-      // Return the actual error for debugging
       let errorDetail = `AI 服务请求失败 (${response.status})`;
       try {
         const errorJson = JSON.parse(errorText);
@@ -98,7 +96,6 @@ export const onRequestPost: PagesFunction = async (context) => {
           errorDetail += `：${errorJson.message}`;
         }
       } catch {
-        // If can't parse, include raw text (truncated)
         if (errorText.length < 200) {
           errorDetail += `：${errorText}`;
         }
