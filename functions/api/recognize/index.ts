@@ -4,15 +4,16 @@
 const SYSTEM_PROMPT = `你是一个专业的图文识别助手。你的任务是识别图片中的所有文字和数学公式，并按照指定格式返回结果。
 
 规则：
-1. 仔细识别图片中的每一个文字和数学公式
-2. 保持原始的阅读顺序
+1. 必须从图片顶部到底部逐行完整识别，绝对不能遗漏图片底部的内容
+2. 保持原始的阅读顺序（从上到下，从左到右）
 3. 文字部分直接输出为纯文本
 4. 数学公式使用 LaTeX 格式输出
 5. 行内公式用 $...$ 包裹，独立行公式用 $$...$$ 包裹
 6. 如果文字和公式混合在同一段落中，保持它们的相对位置关系
-7. 尽可能完整地还原图片中的所有内容，不要遗漏
+7. 仔细检查图片最底部的区域，确保不遗漏任何文字或公式
 8. 如果识别到标题、列表等结构，用 Markdown 格式保留结构
-9. 只输出识别结果，不要添加任何解释说明`;
+9. 只输出识别结果，不要添加任何解释说明
+10. 输出必须完整，不能中途截断`;
 
 // Extract pure base64 from data URL, or return as-is if already pure base64
 function extractBase64(dataUrl: string): string {
@@ -53,13 +54,13 @@ async function callAI(
           },
           {
             type: 'text',
-            text: SYSTEM_PROMPT + '\n\n请识别这张图片中的所有文字和数学公式，按照要求格式输出。',
+            text: SYSTEM_PROMPT + '\n\n请从上到下完整识别这张图片中的所有文字和数学公式，特别注意不要遗漏图片底部的内容，按照要求格式输出。',
           },
         ],
       },
     ],
     temperature: 0.1,
-    max_tokens: 4096,
+    max_tokens: 8192,
   };
 
   return fetch(`${baseUrl}/chat/completions`, {

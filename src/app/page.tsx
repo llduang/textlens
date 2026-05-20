@@ -8,7 +8,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  ClipboardPaste,
   Upload,
   Sparkles,
   Copy,
@@ -16,9 +15,6 @@ import {
   RotateCcw,
   ImagePlus,
   X,
-  History,
-  Trash2,
-  ChevronRight,
   FileText,
   BookOpen,
   Globe,
@@ -31,13 +27,6 @@ import {
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-interface HistoryRecord {
-  id: string;
-  thumbnail: string;
-  result: string;
-  timestamp: number;
-}
 
 type FormatId = 'typora' | 'word' | 'web';
 
@@ -57,20 +46,14 @@ const FORMAT_OPTIONS: FormatOption[] = [
     label: 'Typora',
     icon: <BookOpen className="w-3.5 h-3.5" />,
     description: 'Markdown + LaTeX，适用于 Typora 等 Markdown 编辑器',
-    transform: (raw: string) => {
-      // The raw result from AI already uses $...$ and $$...$$ for LaTeX
-      // Just return as-is for Typora compatibility
-      return raw;
-    },
+    transform: (raw: string) => raw,
   },
   {
     id: 'word',
     label: 'Word',
     icon: <FileText className="w-3.5 h-3.5" />,
     description: '带 MathML 的 HTML 格式，可直接粘贴到 Word 中渲染公式',
-    transform: (raw: string) => {
-      return markdownToWordHTML(raw);
-    },
+    transform: (raw: string) => markdownToWordHTML(raw),
   },
   {
     id: 'web',
@@ -78,11 +61,8 @@ const FORMAT_OPTIONS: FormatOption[] = [
     icon: <Globe className="w-3.5 h-3.5" />,
     description: '纯文本 + LaTeX 标记，适用于网页表单和文本输入',
     transform: (raw: string) => {
-      // Convert $$...$$ to \[...\] and $...$ to \(...\) for web compatibility
       let result = raw;
-      // Block formulas: $$...$$ → \[...\]
       result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_, formula) => `\\[${formula.trim()}\\]`);
-      // Inline formulas: $...$ → \(...\)
       result = result.replace(/\$([^\$\n]+?)\$/g, (_, formula) => `\\(${formula}\\)`);
       return result;
     },
@@ -94,7 +74,6 @@ const FORMAT_OPTIONS: FormatOption[] = [
 function markdownToWordHTML(md: string): string {
   let html = md;
 
-  // Convert block formulas $$...$$ to MathML
   html = html.replace(/\$\$([\s\S]*?)\$\$/g, (_, formula) => {
     try {
       const mathml = katex.renderToString(formula.trim(), {
@@ -108,7 +87,6 @@ function markdownToWordHTML(md: string): string {
     }
   });
 
-  // Convert inline formulas $...$ to MathML
   html = html.replace(/\$([^\$\n]+?)\$/g, (_, formula) => {
     try {
       const mathml = katex.renderToString(formula.trim(), {
@@ -122,23 +100,15 @@ function markdownToWordHTML(md: string): string {
     }
   });
 
-  // Convert Markdown headings
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-  // Convert bold and italic
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-  // Convert unordered lists
   html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
   html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-
-  // Convert ordered lists
   html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
 
-  // Convert paragraphs (lines not already wrapped in tags)
   html = html
     .split('\n\n')
     .map((block) => {
@@ -158,10 +128,6 @@ function renderResultToHTML(raw: string): { html: string; hasError: boolean } {
   try {
     let html = raw;
 
-    // First, escape HTML special chars in non-formula parts
-    // We need to be careful: split by formulas, escape text, then reassemble
-
-    // Replace block formulas $$...$$ with rendered KaTeX
     html = html.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
       try {
         return katex.renderToString(formula.trim(), {
@@ -173,7 +139,6 @@ function renderResultToHTML(raw: string): { html: string; hasError: boolean } {
       }
     });
 
-    // Replace inline formulas $...$ with rendered KaTeX
     html = html.replace(/\$([^\$\n]+?)\$/g, (match, formula) => {
       try {
         return katex.renderToString(formula.trim(), {
@@ -185,37 +150,17 @@ function renderResultToHTML(raw: string): { html: string; hasError: boolean } {
       }
     });
 
-    // Convert Markdown headings
     html = html.replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold mt-3 mb-1">$1</h3>');
     html = html.replace(/^## (.+)$/gm, '<h2 class="text-lg font-semibold mt-4 mb-1">$1</h2>');
     html = html.replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold mt-4 mb-2">$1</h1>');
-
-    // Convert bold and italic
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-    // Convert line breaks to <br> for simple text lines
     html = html.replace(/\n/g, '<br>');
 
     return { html, hasError: false };
   } catch {
     return { html: raw, hasError: true };
   }
-}
-
-function getRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes}分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时前`;
-  const days = Math.floor(hours / 24);
-  return `${days}天前`;
-}
-
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────
@@ -229,40 +174,17 @@ export default function Home() {
   const [selectedFormat, setSelectedFormat] = useState<FormatId>('typora');
   const [copied, setCopied] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  // Load history from localStorage on mount
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('textlens-history');
-      if (stored) {
-        setHistory(JSON.parse(stored));
-      }
-    } catch {
-      // Ignore parse errors
-    }
-  }, []);
-
-  // Save history to localStorage when it changes
-  useEffect(() => {
-    try {
-      localStorage.setItem('textlens-history', JSON.stringify(history));
-    } catch {
-      // Ignore storage errors
-    }
-  }, [history]);
-
   // ─── Image Input Handlers ───────────────────────────────────────────────
 
-  const compressImage = useCallback((dataUrl: string, maxWidth: number = 1920, quality: number = 0.85): Promise<string> => {
+  const compressImage = useCallback((dataUrl: string, maxWidth: number = 2048, quality: number = 0.9): Promise<string> => {
     return new Promise((resolve) => {
       const img = new window.Image();
       img.onload = () => {
-        // If image is small enough, return as-is
-        if (img.width <= maxWidth && dataUrl.length < 2 * 1024 * 1024) {
+        // If image is small enough, return as-is (don't over-compress)
+        if (img.width <= maxWidth && dataUrl.length < 4 * 1024 * 1024) {
           resolve(dataUrl);
           return;
         }
@@ -273,7 +195,7 @@ export default function Home() {
         const ctx = canvas.getContext('2d');
         if (!ctx) { resolve(dataUrl); return; }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const compressed = canvas.toDataURL('image/jpeg', quality);
+        const compressed = canvas.toDataURL('image/png', quality);
         resolve(compressed);
       };
       img.onerror = () => resolve(dataUrl);
@@ -283,7 +205,6 @@ export default function Home() {
 
   const handleImageInput = useCallback(async (dataUrl: string) => {
     setImagePreview(dataUrl);
-    // Compress before sending to API
     const compressed = await compressImage(dataUrl);
     setRawImageData(compressed);
     setRecognizeResult('');
@@ -323,7 +244,6 @@ export default function Home() {
       handleImageInput(result);
     };
     reader.readAsDataURL(file);
-    // Reset input so the same file can be selected again
     e.target.value = '';
   }, [handleImageInput, toast]);
 
@@ -394,16 +314,6 @@ export default function Home() {
       }
 
       setRecognizeResult(data.result);
-
-      // Add to history
-      const record: HistoryRecord = {
-        id: generateId(),
-        thumbnail: rawImageData.substring(0, 200),
-        result: data.result,
-        timestamp: Date.now(),
-      };
-      setHistory((prev) => [record, ...prev].slice(0, 50));
-
     } catch {
       setError('网络错误，请检查网络连接后重试');
     } finally {
@@ -431,9 +341,8 @@ export default function Home() {
 
     try {
       if (selectedFormat === 'word') {
-        // For Word format, copy as HTML to clipboard so Word can render formulas
         const htmlContent = formattedOutput;
-        const textContent = recognizeResult; // Plain text fallback
+        const textContent = recognizeResult;
         const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
         const textBlob = new Blob([textContent], { type: 'text/plain' });
         const clipboardItem = new ClipboardItem({
@@ -468,31 +377,13 @@ export default function Home() {
     return renderResultToHTML(recognizeResult);
   }, [recognizeResult]);
 
-  // ─── History handlers ──────────────────────────────────────────────────
-
-  const loadFromHistory = useCallback((record: HistoryRecord) => {
-    // We don't have the full image data in history thumbnail, so just set the result
-    setRecognizeResult(record.result);
-    setImagePreview(null);
-    setRawImageData(null);
-    setShowHistory(false);
-  }, []);
-
-  const deleteFromHistory = useCallback((id: string) => {
-    setHistory((prev) => prev.filter((r) => r.id !== id));
-  }, []);
-
-  const clearHistory = useCallback(() => {
-    setHistory([]);
-  }, []);
-
   // ─── Render ─────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-stone-50 to-white">
       {/* ─── Header ──────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-stone-200/60">
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shadow-emerald-200">
               <Wand2 className="w-[18px] h-[18px] text-white" />
@@ -504,26 +395,12 @@ export default function Home() {
               图文识别
             </Badge>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowHistory(true)}
-            className="text-stone-600 hover:text-stone-900 gap-1.5"
-          >
-            <History className="w-4 h-4" />
-            <span className="hidden sm:inline">历史记录</span>
-            {history.length > 0 && (
-              <Badge className="ml-1 h-5 min-w-5 px-1.5 text-[10px] bg-emerald-500 text-white">
-                {history.length}
-              </Badge>
-            )}
-          </Button>
         </div>
       </header>
 
       {/* ─── Main Content ────────────────────────────────────────────────── */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-8">
-        {/* Hero section - only show when no image */}
+        {/* Hero section */}
         {!imagePreview && !recognizeResult && (
           <div className="text-center mb-8 animate-in fade-in slide-in-from-4 duration-500">
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight mb-2">
@@ -694,7 +571,7 @@ export default function Home() {
                     </span>
                   </div>
                   <CardContent className="p-4">
-                    <ScrollArea className="max-h-80">
+                    <ScrollArea className="max-h-96">
                       <div
                         className="rendered-content text-sm leading-relaxed text-stone-800"
                         dangerouslySetInnerHTML={{ __html: renderedPreview.html }}
@@ -812,7 +689,7 @@ export default function Home() {
               </>
             )}
 
-            {/* Hint to paste more when only result is shown (no image) */}
+            {/* Hint */}
             {recognizeResult && !imagePreview && !isRecognizing && (
               <div className="text-center">
                 <p className="text-xs text-stone-400">
@@ -828,90 +705,6 @@ export default function Home() {
       <footer className="py-4 text-center text-xs text-stone-400 border-t border-stone-100">
         <p>TextLens · 基于 AI 视觉模型的图文识别工具</p>
       </footer>
-
-      {/* ─── History Drawer ──────────────────────────────────────────────── */}
-      {showHistory && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-50 bg-black/20 backdrop-blur-sm animate-in fade-in duration-200"
-            onClick={() => setShowHistory(false)}
-          />
-
-          {/* Drawer */}
-          <div className="fixed right-0 top-0 bottom-0 z-50 w-80 max-w-[85vw] bg-white shadow-xl border-l border-stone-200/60 animate-in slide-in-from-right duration-300 flex flex-col">
-            <div className="px-4 py-3 border-b border-stone-200/60 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-stone-800 flex items-center gap-1.5">
-                <History className="w-4 h-4 text-emerald-600" />
-                历史记录
-              </h3>
-              <div className="flex items-center gap-2">
-                {history.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={clearHistory}
-                    className="h-7 text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
-                  >
-                    <Trash2 className="w-3 h-3 mr-1" />
-                    清空
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowHistory(false)}
-                  className="h-7 w-7 p-0 text-stone-400"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-
-            <ScrollArea className="flex-1">
-              {history.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-stone-400">
-                  <ClipboardPaste className="w-8 h-8 mb-2 opacity-50" />
-                  <p className="text-sm">暂无历史记录</p>
-                </div>
-              ) : (
-                <div className="p-2 space-y-1">
-                  {history.map((record) => (
-                    <div
-                      key={record.id}
-                      className="group relative p-3 rounded-lg hover:bg-stone-50 cursor-pointer transition-colors"
-                      onClick={() => loadFromHistory(record)}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-md bg-stone-100 flex items-center justify-center flex-shrink-0">
-                          <ImageIcon className="w-4 h-4 text-stone-400" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-stone-700 line-clamp-2 leading-relaxed">
-                            {record.result.substring(0, 80)}
-                          </p>
-                          <p className="text-[10px] text-stone-400 mt-1">
-                            {getRelativeTime(record.timestamp)}
-                          </p>
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteFromHistory(record.id);
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-stone-300 hover:text-red-500 transition-all"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-        </>
-      )}
     </div>
   );
 }
