@@ -174,6 +174,7 @@ export default function Home() {
   const [selectedFormat, setSelectedFormat] = useState<FormatId>('typora');
   const [copied, setCopied] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [editText, setEditText] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -277,6 +278,7 @@ export default function Home() {
     setImagePreview(null);
     setRawImageData(null);
     setRecognizeResult('');
+    setEditText('');
     setError(null);
   }, []);
 
@@ -314,6 +316,7 @@ export default function Home() {
       }
 
       setRecognizeResult(data.result);
+      setEditText(data.result);
     } catch {
       setError('网络错误，请检查网络连接后重试');
     } finally {
@@ -331,10 +334,10 @@ export default function Home() {
   // ─── Copy ───────────────────────────────────────────────────────────────
 
   const formattedOutput = useMemo(() => {
-    if (!recognizeResult) return '';
+    if (!editText) return '';
     const fmt = FORMAT_OPTIONS.find((f) => f.id === selectedFormat);
-    return fmt ? fmt.transform(recognizeResult) : recognizeResult;
-  }, [recognizeResult, selectedFormat]);
+    return fmt ? fmt.transform(editText) : editText;
+  }, [editText, selectedFormat]);
 
   const copyFormatted = useCallback(async () => {
     if (!formattedOutput) return;
@@ -342,7 +345,7 @@ export default function Home() {
     try {
       if (selectedFormat === 'word') {
         const htmlContent = formattedOutput;
-        const textContent = recognizeResult;
+        const textContent = editText;
         const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
         const textBlob = new Blob([textContent], { type: 'text/plain' });
         const clipboardItem = new ClipboardItem({
@@ -368,14 +371,14 @@ export default function Home() {
         variant: 'destructive',
       });
     }
-  }, [formattedOutput, selectedFormat, recognizeResult, toast]);
+  }, [formattedOutput, selectedFormat, editText, toast]);
 
   // ─── Rendered preview ──────────────────────────────────────────────────
 
   const renderedPreview = useMemo(() => {
-    if (!recognizeResult) return { html: '', hasError: false };
-    return renderResultToHTML(recognizeResult);
-  }, [recognizeResult]);
+    if (!editText) return { html: '', hasError: false };
+    return renderResultToHTML(editText);
+  }, [editText]);
 
   // ─── Render ─────────────────────────────────────────────────────────────
 
@@ -401,7 +404,7 @@ export default function Home() {
       {/* ─── Main Content ────────────────────────────────────────────────── */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-8">
         {/* Hero section */}
-        {!imagePreview && !recognizeResult && (
+        {!imagePreview && !editText && (
           <div className="text-center mb-8 animate-in fade-in slide-in-from-4 duration-500">
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight mb-2">
               <span className="bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
@@ -415,7 +418,7 @@ export default function Home() {
         )}
 
         {/* ─── Upload Zone ──────────────────────────────────────────────── */}
-        {!imagePreview && !recognizeResult && (
+        {!imagePreview && !editText && (
           <div className="space-y-6 animate-in fade-in slide-in-from-4 duration-700">
             <Card
               className={`border-2 border-dashed transition-all duration-200 cursor-pointer ${
@@ -490,7 +493,7 @@ export default function Home() {
         )}
 
         {/* ─── Image Preview + Recognition Result ───────────────────────── */}
-        {(imagePreview || recognizeResult) && (
+        {(imagePreview || editText) && (
           <div className="space-y-4 animate-in fade-in slide-in-from-4 duration-500">
             {/* Image Preview Card */}
             {imagePreview && (
@@ -511,12 +514,16 @@ export default function Home() {
                     </Button>
                   </div>
                 </div>
-                <CardContent className="p-4 flex justify-center bg-white">
-                  <img
-                    src={imagePreview}
-                    alt="上传的图片"
-                    className="max-h-72 object-contain rounded-lg shadow-sm"
-                  />
+                <CardContent className="p-4 bg-white">
+                  <ScrollArea className="max-h-72">
+                    <div className="flex justify-center">
+                      <img
+                        src={imagePreview}
+                        alt="上传的图片"
+                        className="object-contain rounded-lg shadow-sm"
+                      />
+                    </div>
+                  </ScrollArea>
                 </CardContent>
               </Card>
             )}
@@ -560,7 +567,7 @@ export default function Home() {
             )}
 
             {/* Recognition Result */}
-            {recognizeResult && !isRecognizing && (
+            {editText && !isRecognizing && (
               <>
                 {/* Rendered Preview */}
                 <Card className="border-stone-200/80 overflow-hidden">
@@ -571,7 +578,7 @@ export default function Home() {
                     </span>
                   </div>
                   <CardContent className="p-4">
-                    <ScrollArea className="max-h-96">
+                    <ScrollArea className="h-[320px]">
                       <div
                         className="rendered-content text-sm leading-relaxed text-stone-800"
                         dangerouslySetInnerHTML={{ __html: renderedPreview.html }}
@@ -627,14 +634,15 @@ export default function Home() {
                     ))}
                   </div>
 
-                  {/* Code Output */}
+                  {/* Editable Text Area */}
                   <CardContent className="p-0">
                     <div className="relative">
-                      <ScrollArea className="max-h-64">
-                        <pre className="p-4 text-xs leading-relaxed font-mono text-emerald-400 bg-stone-950 whitespace-pre-wrap break-all">
-                          {formattedOutput}
-                        </pre>
-                      </ScrollArea>
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        className="w-full min-h-[160px] max-h-64 p-4 text-xs leading-relaxed font-mono text-emerald-400 bg-stone-950 whitespace-pre-wrap break-words resize-y overflow-auto outline-none border-none focus:ring-0 focus:outline-none"
+                        placeholder="识别结果将在此显示，您可以直接编辑..."
+                      />
                       <button
                         onClick={copyFormatted}
                         className="absolute top-2 right-2 p-1.5 rounded-md bg-stone-800/80 text-stone-400 hover:text-white hover:bg-stone-700 transition-colors"
@@ -690,7 +698,7 @@ export default function Home() {
             )}
 
             {/* Hint */}
-            {recognizeResult && !imagePreview && !isRecognizing && (
+            {editText && !imagePreview && !isRecognizing && (
               <div className="text-center">
                 <p className="text-xs text-stone-400">
                   按 Ctrl+V 粘贴新图片即可重新识别
