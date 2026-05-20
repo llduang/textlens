@@ -520,7 +520,7 @@ export default function Home() {
                       <img
                         src={imagePreview}
                         alt="上传的图片"
-                        className="object-contain rounded-lg shadow-sm"
+                        className="max-h-72 object-contain rounded-lg shadow-sm"
                       />
                     </div>
                   </ScrollArea>
