@@ -1,4 +1,5 @@
-export const runtime = 'edge';
+// Cloudflare Pages Function - /api/recognize
+// This replaces the Next.js API route for static export + CF Pages deployment
 
 const SYSTEM_PROMPT = `你是一个专业的图文识别助手。你的任务是识别图片中的所有文字和数学公式，并按照指定格式返回结果。
 
@@ -13,23 +14,26 @@ const SYSTEM_PROMPT = `你是一个专业的图文识别助手。你的任务是
 8. 如果识别到标题、列表等结构，用 Markdown 格式保留结构
 9. 只输出识别结果，不要添加任何解释说明`;
 
-export async function POST(request: Request) {
+export const onRequestPost: PagesFunction = async (context) => {
   try {
-    const { image } = await request.json() as { image: string };
+    const { image } = await context.request.json();
 
     if (!image) {
-      return Response.json({ success: false, error: '请提供图片数据' }, { status: 400 });
+      return new Response(
+        JSON.stringify({ success: false, error: '请提供图片数据' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
-    const apiKey = process.env.AI_API_KEY;
-    const baseUrl = process.env.AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
-    const model = process.env.AI_MODEL || 'glm-4v-flash';
+    const apiKey = context.env.AI_API_KEY;
+    const baseUrl = context.env.AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
+    const model = context.env.AI_MODEL || 'glm-4v-flash';
 
     if (!apiKey) {
-      return Response.json({
-        success: false,
-        error: '未配置 API 密钥，请在环境变量中设置 AI_API_KEY'
-      }, { status: 500 });
+      return new Response(
+        JSON.stringify({ success: false, error: '未配置 API 密钥，请在环境变量中设置 AI_API_KEY' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -69,37 +73,37 @@ export async function POST(request: Request) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('AI API error:', response.status, errorText);
-      return Response.json({
-        success: false,
-        error: `AI 服务请求失败 (${response.status})，请稍后重试`
-      }, { status: 500 });
+      return new Response(
+        JSON.stringify({ success: false, error: `AI 服务请求失败 (${response.status})，请稍后重试` }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || '';
 
     if (!content) {
-      return Response.json({
-        success: false,
-        error: '识别结果为空，请尝试上传更清晰的图片'
-      }, { status: 500 });
+      return new Response(
+        JSON.stringify({ success: false, error: '识别结果为空，请尝试上传更清晰的图片' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
-    // Post-process: clean up any markdown code fences the model might add
+    // Post-process: clean up any markdown code fences
     let cleaned = content.trim();
     cleaned = cleaned.replace(/^```(?:latex|markdown|md)?\s*\n?/i, '');
     cleaned = cleaned.replace(/\n?```\s*$/i, '');
     cleaned = cleaned.trim();
 
-    return Response.json({
-      success: true,
-      result: cleaned,
-    });
+    return new Response(
+      JSON.stringify({ success: true, result: cleaned }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
   } catch (error) {
     console.error('Recognition error:', error);
-    return Response.json({
-      success: false,
-      error: '识别过程发生错误，请稍后重试'
-    }, { status: 500 });
+    return new Response(
+      JSON.stringify({ success: false, error: '识别过程发生错误，请稍后重试' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
   }
-}
+};

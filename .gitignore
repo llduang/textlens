@@ -51,4 +51,10 @@ prompt
 
 server.log
 # Skills directory
-/skills/formula-lens-reference/
+/skills/
+
+# Reference project (not for deployment)
+formula-lens-reference/
+
+# Wrangler local state
+.wrangler/
