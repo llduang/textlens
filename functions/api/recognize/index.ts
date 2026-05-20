@@ -16,7 +16,6 @@ const SYSTEM_PROMPT = `你是一个专业的图文识别助手。你的任务是
 
 // Extract pure base64 from data URL, or return as-is if already pure base64
 function extractBase64(dataUrl: string): string {
-  // If it starts with "data:image/", strip the prefix
   if (dataUrl.startsWith('data:image/')) {
     const commaIndex = dataUrl.indexOf(',');
     if (commaIndex !== -1) {
@@ -24,6 +23,53 @@ function extractBase64(dataUrl: string): string {
     }
   }
   return dataUrl;
+}
+
+// Sleep utility
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Models to try in order (fallback chain)
+const MODEL_FALLBACKS = ['glm-4.6v-flash'];
+
+async function callAI(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  imageData: string,
+): Promise<Response> {
+  const requestBody = {
+    model,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: {
+              url: imageData,
+            },
+          },
+          {
+            type: 'text',
+            text: SYSTEM_PROMPT + '\n\n请识别这张图片中的所有文字和数学公式，按照要求格式输出。',
+          },
+        ],
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 4096,
+  };
+
+  return fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  });
 }
 
 export const onRequestPost: PagesFunction = async (context) => {
@@ -39,7 +85,7 @@ export const onRequestPost: PagesFunction = async (context) => {
 
     const apiKey = context.env.AI_API_KEY;
     const baseUrl = context.env.AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
-    const model = context.env.AI_MODEL || 'glm-4.6v-flash';
+    const configuredModel = context.env.AI_MODEL;
 
     if (!apiKey) {
       return new Response(
@@ -48,83 +94,90 @@ export const onRequestPost: PagesFunction = async (context) => {
       );
     }
 
-    // ZhipuAI accepts both URL and pure base64 string
-    // For base64 data URLs, we need to extract the pure base64 part
+    // Extract pure base64
     const imageData = extractBase64(image);
 
-    const requestBody = {
-      model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: {
-                url: imageData,
-              },
-            },
-            {
-              type: 'text',
-              text: SYSTEM_PROMPT + '\n\n请识别这张图片中的所有文字和数学公式，按照要求格式输出。',
-            },
-          ],
-        },
-      ],
-      temperature: 0.1,
-      max_tokens: 4096,
-    };
+    // Build model list: configured model first, then fallbacks
+    const modelsToTry = configuredModel
+      ? [configuredModel, ...MODEL_FALLBACKS.filter(m => m !== configuredModel)]
+      : MODEL_FALLBACKS;
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-    });
+    const maxRetries = 3;
+    let lastError = '';
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('AI API error:', response.status, errorText);
-      let errorDetail = `AI 服务请求失败 (${response.status})`;
-      try {
-        const errorJson = JSON.parse(errorText);
-        if (errorJson.error?.message) {
-          errorDetail += `：${errorJson.error.message}`;
-        } else if (errorJson.message) {
-          errorDetail += `：${errorJson.message}`;
+    // Try each model with retries
+    for (const model of modelsToTry) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        console.log(`Trying model: ${model}, attempt: ${attempt}`);
+
+        const response = await callAI(baseUrl, apiKey, model, imageData);
+
+        if (response.ok) {
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content || '';
+
+          if (!content) {
+            return new Response(
+              JSON.stringify({ success: false, error: '识别结果为空，请尝试上传更清晰的图片' }),
+              { status: 500, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+
+          // Post-process: clean up any markdown code fences
+          let cleaned = content.trim();
+          cleaned = cleaned.replace(/^```(?:latex|markdown|md)?\s*\n?/i, '');
+          cleaned = cleaned.replace(/\n?```\s*$/i, '');
+          cleaned = cleaned.trim();
+
+          return new Response(
+            JSON.stringify({ success: true, result: cleaned }),
+            { headers: { 'Content-Type': 'application/json' } }
+          );
         }
-      } catch {
-        if (errorText.length < 200) {
-          errorDetail += `：${errorText}`;
+
+        // Handle error responses
+        const errorText = await response.text();
+        console.error(`AI API error (model=${model}, attempt=${attempt}):`, response.status, errorText);
+
+        let errorDetail = '';
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetail = errorJson.error?.message || errorJson.message || '';
+        } catch {
+          errorDetail = errorText.substring(0, 200);
+        }
+
+        lastError = errorDetail;
+
+        // If 429 (rate limited), wait and retry
+        if (response.status === 429) {
+          const waitTime = attempt * 2000; // 2s, 4s, 6s
+          console.log(`Rate limited, waiting ${waitTime}ms before retry...`);
+          await sleep(waitTime);
+          continue;
+        }
+
+        // If 400 (bad request), try next model
+        if (response.status === 400) {
+          console.log(`Model ${model} returned 400, trying next model...`);
+          break; // break out of retry loop, go to next model
+        }
+
+        // Other errors, retry
+        if (attempt < maxRetries) {
+          await sleep(1000);
+          continue;
         }
       }
-      return new Response(
-        JSON.stringify({ success: false, error: errorDetail }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-
-    if (!content) {
-      return new Response(
-        JSON.stringify({ success: false, error: '识别结果为空，请尝试上传更清晰的图片' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Post-process: clean up any markdown code fences
-    let cleaned = content.trim();
-    cleaned = cleaned.replace(/^```(?:latex|markdown|md)?\s*\n?/i, '');
-    cleaned = cleaned.replace(/\n?```\s*$/i, '');
-    cleaned = cleaned.trim();
-
+    // All models and retries failed
     return new Response(
-      JSON.stringify({ success: true, result: cleaned }),
-      { headers: { 'Content-Type': 'application/json' } }
+      JSON.stringify({
+        success: false,
+        error: `AI 服务暂时不可用${lastError ? '：' + lastError : ''}，请稍后再试`,
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (error) {
     console.error('Recognition error:', error);

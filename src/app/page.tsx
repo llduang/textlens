@@ -658,7 +658,7 @@ export default function Home() {
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
                   <p className="text-sm font-medium text-emerald-700">正在识别文字与公式...</p>
-                  <p className="text-xs text-emerald-500/70 mt-1">AI 正在分析图片内容</p>
+                  <p className="text-xs text-emerald-500/70 mt-1">AI 正在分析图片内容，如遇高峰期可能需要等待</p>
                 </CardContent>
               </Card>
             )}
