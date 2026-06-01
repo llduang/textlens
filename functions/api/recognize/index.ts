@@ -103,7 +103,7 @@ export const onRequestPost: PagesFunction = async (context) => {
       ? [configuredModel, ...MODEL_FALLBACKS.filter(m => m !== configuredModel)]
       : MODEL_FALLBACKS;
 
-    const maxRetries = 3;
+    const maxRetries = 7;
     let lastError = '';
 
     // Try each model with retries
@@ -152,7 +152,7 @@ export const onRequestPost: PagesFunction = async (context) => {
 
         // If 429 (rate limited), wait and retry
         if (response.status === 429) {
-          const waitTime = attempt * 2000; // 2s, 4s, 6s
+          const waitTime = attempt * 3000; // 3s, 6s, 9s
           console.log(`Rate limited, waiting ${waitTime}ms before retry...`);
           await sleep(waitTime);
           continue;
